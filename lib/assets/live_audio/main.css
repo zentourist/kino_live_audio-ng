@@ -1,0 +1,168 @@
+.kino-live-audio-container {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  padding: 20px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  max-width: 500px;
+}
+
+.kino-live-audio-controls {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.kino-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: white;
+  flex: 1;
+  min-width: 140px;
+  justify-content: center;
+}
+
+.kino-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.kino-btn svg {
+  flex-shrink: 0;
+}
+
+.kino-btn-record {
+  background: #dc3545;
+}
+
+.kino-btn-record:not(:disabled):hover {
+  background: #c82333;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(220, 53, 69, 0.3);
+}
+
+.kino-btn-stop {
+  background: #6c757d;
+}
+
+.kino-btn-stop:not(:disabled):hover {
+  background: #5a6268;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(108, 117, 125, 0.3);
+}
+
+.kino-btn-clear {
+  background: #ffc107;
+  color: #212529;
+}
+
+.kino-btn-clear:not(:disabled):hover {
+  background: #e0a800;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(255, 193, 7, 0.3);
+}
+
+.kino-live-audio-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  background: white;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  border: 1px solid #dee2e6;
+}
+
+.status-indicator {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-indicator.status-ready {
+  background: #28a745;
+}
+
+.status-indicator.status-recording {
+  background: #dc3545;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.status-indicator.status-error {
+  background: #ffc107;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.status-text {
+  font-size: 14px;
+  color: #495057;
+  font-weight: 500;
+}
+
+.kino-live-audio-timer {
+  padding: 12px;
+  background: white;
+  border-radius: 6px;
+  text-align: center;
+  margin-bottom: 12px;
+  border: 1px solid #dee2e6;
+}
+
+.timer-text {
+  font-size: 24px;
+  font-weight: 600;
+  color: #212529;
+  font-variant-numeric: tabular-nums;
+}
+
+.kino-live-audio-player {
+  margin-top: 12px;
+  padding: 12px;
+  background: white;
+  border-radius: 6px;
+  border: 1px solid #dee2e6;
+}
+
+.kino-live-audio-player audio {
+  width: 100%;
+  height: 40px;
+}
+
+.kino-live-audio-error {
+  margin-top: 12px;
+  padding: 12px;
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 6px;
+  color: #856404;
+  font-size: 14px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+  .kino-live-audio-controls {
+    flex-direction: column;
+  }
+
+  .kino-btn {
+    min-width: auto;
+  }
+}

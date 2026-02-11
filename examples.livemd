@@ -1,0 +1,160 @@
+# KinoLiveAudio Examples
+
+```elixir
+Mix.install([
+  {:kino_live_audio, path: "#{__DIR__}"}
+])
+```
+
+## Basic Usage
+
+```elixir
+# Create a simple audio recorder
+recorder = KinoLiveAudio.new()
+```
+
+Click the "Start Recording" button above, speak into your microphone, then click "Stop Recording" to capture audio.
+
+```elixir
+# Read the recorded audio data
+audio_data = KinoLiveAudio.read(recorder)
+
+if audio_data do
+  IO.puts("Recorded #{byte_size(audio_data)} bytes of audio data")
+else
+  IO.puts("No audio recorded yet")
+end
+```
+
+## Custom Configuration
+
+```elixir
+# Record with custom settings
+recorder_custom = KinoLiveAudio.new(
+  format: :webm,
+  sample_rate: 44100,
+  auto_play: true
+)
+```
+
+## Programmatic Control
+
+```elixir
+# Create a recorder
+recorder_prog = KinoLiveAudio.new()
+```
+
+```elixir
+# Start recording from code
+KinoLiveAudio.start_recording(recorder_prog)
+IO.puts("Recording started... (will stop in 5 seconds)")
+```
+
+```elixir
+# Wait 5 seconds
+Process.sleep(5000)
+
+# Stop recording
+KinoLiveAudio.stop_recording(recorder_prog)
+IO.puts("Recording stopped!")
+```
+
+```elixir
+# Read the recorded audio
+audio_data = KinoLiveAudio.read(recorder_prog)
+
+if audio_data do
+  IO.puts("Captured #{byte_size(audio_data)} bytes")
+else
+  IO.puts("No audio captured")
+end
+```
+
+## Save to File
+
+```elixir
+# Record audio first using any of the methods above
+recorder_save = KinoLiveAudio.new()
+```
+
+```elixir
+# After recording, save to a file
+audio_data = KinoLiveAudio.read(recorder_save)
+
+if audio_data do
+  filename = "/tmp/recording_#{System.system_time(:second)}.webm"
+  File.write!(filename, audio_data)
+  IO.puts("Audio saved to #{filename}")
+else
+  IO.puts("No audio to save")
+end
+```
+
+## Clear Recording
+
+```elixir
+# Clear the recorded audio
+KinoLiveAudio.clear(recorder)
+IO.puts("Recording cleared!")
+```
+
+## Different Formats
+
+```elixir
+# Try different audio formats
+formats = [:webm, :wav, :mp3, :ogg]
+
+for format <- formats do
+  recorder = KinoLiveAudio.new(format: format)
+  IO.puts("Created recorder with format: #{format}")
+  Kino.render(recorder)
+end
+
+:ok
+```
+
+## Audio Analysis
+
+```elixir
+# Example: Get basic audio info
+recorder_analysis = KinoLiveAudio.new()
+```
+
+```elixir
+audio_data = KinoLiveAudio.read(recorder_analysis)
+
+if audio_data do
+  size_kb = byte_size(audio_data) / 1024
+  IO.puts("""
+  Audio Information:
+  - Size: #{Float.round(size_kb, 2)} KB
+  - Bytes: #{byte_size(audio_data)}
+  - Format: WebM
+  """)
+else
+  IO.puts("No audio recorded")
+end
+```
+
+## Multiple Recorders
+
+You can have multiple recorders on the same page!
+
+```elixir
+# Create multiple recorders
+recorder1 = KinoLiveAudio.new()
+recorder2 = KinoLiveAudio.new()
+
+Kino.Layout.grid([recorder1, recorder2], columns: 2)
+```
+
+```elixir
+# Read from both
+audio1 = KinoLiveAudio.read(recorder1)
+audio2 = KinoLiveAudio.read(recorder2)
+
+IO.puts("""
+Recorder 1: #{if audio1, do: "#{byte_size(audio1)} bytes", else: "no audio"}
+Recorder 2: #{if audio2, do: "#{byte_size(audio2)} bytes", else: "no audio"}
+""")
+```

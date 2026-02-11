@@ -1,0 +1,414 @@
+# KinoLiveAudio Demo & Tutorial
+
+```elixir
+Mix.install([
+  {:kino_live_audio, path: "#{__DIR__}"}
+])
+```
+
+## Introduction
+
+Welcome to KinoLiveAudio! This notebook demonstrates all the features of the library.
+
+KinoLiveAudio allows you to record live audio directly from your browser in Livebook notebooks. It's perfect for:
+
+* Voice recording and transcription
+* Audio data collection
+* Speech recognition experiments
+* Podcast creation
+* Audio processing pipelines
+
+## 1. Basic Recording
+
+Let's start with the simplest example:
+
+```elixir
+# Create a recorder with default settings
+recorder = KinoLiveAudio.new()
+```
+
+**Instructions:**
+1. Click the red "Start Recording" button above
+2. Speak into your microphone
+3. Click "Stop Recording" when done
+4. The audio will automatically play back (if auto_play is enabled)
+
+Now let's check the recorded data:
+
+```elixir
+audio_data = KinoLiveAudio.read(recorder)
+
+if audio_data do
+  size_kb = Float.round(byte_size(audio_data) / 1024, 2)
+
+  IO.puts("""
+  ✅ Recording captured!
+
+  Size: #{size_kb} KB
+  Bytes: #{byte_size(audio_data)}
+  Format: WebM (default)
+  """)
+else
+  IO.puts("❌ No audio recorded yet. Use the recorder above!")
+end
+```
+
+## 2. Custom Configuration
+
+You can customize the recorder with different options:
+
+```elixir
+# Recorder with custom sample rate and no auto-play
+custom_recorder = KinoLiveAudio.new(
+  format: :webm,
+  sample_rate: 44100,  # CD quality
+  auto_play: false     # Don't play back automatically
+)
+```
+
+Available options:
+
+* `:format` - `:webm`, `:wav`, `:mp3`, or `:ogg` (default: `:webm`)
+* `:sample_rate` - Sample rate in Hz (default: `48000`)
+* `:auto_play` - Auto-play after recording (default: `true`)
+
+## 3. Programmatic Control
+
+You can control recording from your Elixir code:
+
+```elixir
+# Create a recorder for programmatic control
+prog_recorder = KinoLiveAudio.new()
+```
+
+```elixir
+# Start recording from code
+IO.puts("🎙️  Starting recording...")
+KinoLiveAudio.start_recording(prog_recorder)
+
+# Record for 5 seconds
+IO.puts("Recording for 5 seconds...")
+Process.sleep(5000)
+
+# Stop recording
+IO.puts("⏹️  Stopping recording...")
+KinoLiveAudio.stop_recording(prog_recorder)
+
+IO.puts("✅ Recording complete!")
+```
+
+```elixir
+# Check what was recorded
+audio_data = KinoLiveAudio.read(prog_recorder)
+
+if audio_data do
+  IO.puts("Captured #{byte_size(audio_data)} bytes of audio")
+else
+  IO.puts("No audio captured")
+end
+```
+
+## 4. Saving Audio to Files
+
+Once you've recorded audio, you can save it to a file:
+
+```elixir
+# Create a recorder for file saving demo
+save_recorder = KinoLiveAudio.new()
+```
+
+Record something, then run the cell below:
+
+```elixir
+audio_data = KinoLiveAudio.read(save_recorder)
+
+if audio_data do
+  # Generate a unique filename
+  timestamp = System.system_time(:second)
+  filename = "/tmp/recording_#{timestamp}.webm"
+
+  # Save the file
+  File.write!(filename, audio_data)
+
+  IO.puts("""
+  ✅ Audio saved successfully!
+
+  Location: #{filename}
+  Size: #{Float.round(byte_size(audio_data) / 1024, 2)} KB
+
+  You can play this file with any media player that supports WebM.
+  """)
+else
+  IO.puts("❌ No audio to save. Record something first!")
+end
+```
+
+## 5. Working with Different Formats
+
+Let's explore different audio formats:
+
+```elixir
+# Create recorders with different formats
+formats = [
+  {:webm, "WebM (Opus codec, best browser support)"},
+  {:wav, "WAV (Uncompressed, larger files)"},
+  {:mp3, "MP3 (Good compression)"},
+  {:ogg, "OGG (Open format)"}
+]
+
+for {format, description} <- formats do
+  IO.puts("#{format}: #{description}")
+  recorder = KinoLiveAudio.new(format: format)
+  Kino.render(recorder)
+end
+
+:ok
+```
+
+**Note:** Browser support varies by format. WebM has the best support across modern browsers. If a format isn't supported, it will automatically fall back to WebM.
+
+## 6. Clearing Recordings
+
+You can clear the recorded audio programmatically:
+
+```elixir
+clear_recorder = KinoLiveAudio.new()
+```
+
+Record something, then clear it:
+
+```elixir
+# Check before clearing
+before = KinoLiveAudio.read(clear_recorder)
+IO.puts("Before clear: #{if before, do: "#{byte_size(before)} bytes", else: "no audio"}")
+
+# Clear the recording
+KinoLiveAudio.clear(clear_recorder)
+
+# Check after clearing
+after_clear = KinoLiveAudio.read(clear_recorder)
+IO.puts("After clear: #{if after_clear, do: "#{byte_size(after_clear)} bytes", else: "no audio"}")
+```
+
+## 7. Multiple Recorders
+
+You can have multiple recorders on the same page:
+
+```elixir
+recorder_a = KinoLiveAudio.new()
+recorder_b = KinoLiveAudio.new()
+recorder_c = KinoLiveAudio.new()
+
+Kino.Layout.grid([
+  Kino.Layout.tabs([{"Recorder A", recorder_a}, {"Recorder B", recorder_b}]),
+  recorder_c
+])
+```
+
+Each recorder is independent and maintains its own state:
+
+```elixir
+audio_a = KinoLiveAudio.read(recorder_a)
+audio_b = KinoLiveAudio.read(recorder_b)
+audio_c = KinoLiveAudio.read(recorder_c)
+
+IO.puts("""
+Recorder A: #{if audio_a, do: "#{byte_size(audio_a)} bytes", else: "no audio"}
+Recorder B: #{if audio_b, do: "#{byte_size(audio_b)} bytes", else: "no audio"}
+Recorder C: #{if audio_c, do: "#{byte_size(audio_c)} bytes", else: "no audio"}
+""")
+```
+
+## 8. Streaming Example (Advanced)
+
+Here's an example of recording multiple audio clips in a loop:
+
+```elixir
+# Create a recorder for streaming
+stream_recorder = KinoLiveAudio.new(auto_play: false)
+```
+
+```elixir
+# Record 3 short clips
+clips = []
+
+for i <- 1..3 do
+  IO.puts("Recording clip #{i}/3...")
+
+  KinoLiveAudio.start_recording(stream_recorder)
+  Process.sleep(3000)  # Record for 3 seconds
+  KinoLiveAudio.stop_recording(stream_recorder)
+
+  # Wait a moment for the data to be processed
+  Process.sleep(500)
+
+  audio_data = KinoLiveAudio.read(stream_recorder)
+
+  if audio_data do
+    clips = [audio_data | clips]
+    IO.puts("✅ Clip #{i} captured: #{byte_size(audio_data)} bytes")
+  end
+
+  # Clear for next recording
+  KinoLiveAudio.clear(stream_recorder)
+
+  if i < 3 do
+    IO.puts("Next clip in 2 seconds...")
+    Process.sleep(2000)
+  end
+end
+
+clips = Enum.reverse(clips)
+IO.puts("\n✅ Captured #{length(clips)} audio clips!")
+clips
+```
+
+## 9. Audio Analysis
+
+Let's analyze the recorded audio:
+
+```elixir
+analysis_recorder = KinoLiveAudio.new()
+```
+
+Record something, then analyze it:
+
+```elixir
+audio_data = KinoLiveAudio.read(analysis_recorder)
+
+if audio_data do
+  size_bytes = byte_size(audio_data)
+  size_kb = Float.round(size_bytes / 1024, 2)
+  size_mb = Float.round(size_bytes / (1024 * 1024), 2)
+
+  # Estimate bitrate (rough approximation)
+  # WebM typically uses variable bitrate, so this is just an estimate
+
+  IO.puts("""
+  📊 Audio Analysis
+  ═══════════════════
+
+  Size:
+    - #{size_bytes} bytes
+    - #{size_kb} KB
+    - #{size_mb} MB
+
+  Format: WebM (Opus codec)
+  Sample Rate: 48000 Hz (default)
+  Channels: Mono (1 channel)
+
+  Note: For detailed analysis, you can use external tools
+  like FFmpeg or audio processing libraries.
+  """)
+else
+  IO.puts("No audio to analyze. Record something first!")
+end
+```
+
+## 10. Integration Example: Save All Recordings
+
+Here's a practical example that saves all recordings with metadata:
+
+```elixir
+defmodule AudioRecorder do
+  def save_recording(audio_data, format \\ :webm) do
+    timestamp = DateTime.utc_now() |> DateTime.to_unix()
+    filename = "recording_#{timestamp}.#{format}"
+    path = Path.join("/tmp", filename)
+
+    File.write!(path, audio_data)
+
+    %{
+      filename: filename,
+      path: path,
+      size: byte_size(audio_data),
+      timestamp: timestamp,
+      format: format
+    }
+  end
+
+  def list_recordings do
+    case File.ls("/tmp") do
+      {:ok, files} ->
+        files
+        |> Enum.filter(&String.starts_with?(&1, "recording_"))
+        |> Enum.map(fn file ->
+          path = Path.join("/tmp", file)
+          stat = File.stat!(path)
+
+          %{
+            filename: file,
+            path: path,
+            size: stat.size,
+            modified: stat.mtime
+          }
+        end)
+        |> Enum.sort_by(& &1.modified, :desc)
+
+      _ -> []
+    end
+  end
+end
+```
+
+```elixir
+# Create a recorder
+final_recorder = KinoLiveAudio.new()
+```
+
+```elixir
+# After recording, save it
+audio_data = KinoLiveAudio.read(final_recorder)
+
+if audio_data do
+  metadata = AudioRecorder.save_recording(audio_data)
+
+  IO.puts("""
+  ✅ Recording saved!
+
+  Filename: #{metadata.filename}
+  Path: #{metadata.path}
+  Size: #{Float.round(metadata.size / 1024, 2)} KB
+  """)
+else
+  IO.puts("No audio to save")
+end
+```
+
+```elixir
+# List all recordings
+recordings = AudioRecorder.list_recordings()
+
+IO.puts("📁 All Recordings (#{length(recordings)}):")
+IO.puts("═══════════════════════════════")
+
+for recording <- recordings do
+  size_kb = Float.round(recording.size / 1024, 2)
+  IO.puts("• #{recording.filename} - #{size_kb} KB")
+end
+```
+
+## Summary
+
+You've learned how to:
+
+✅ Create basic audio recorders
+✅ Customize recorder options
+✅ Control recording programmatically
+✅ Save audio to files
+✅ Work with different formats
+✅ Clear recordings
+✅ Use multiple recorders
+✅ Stream audio clips
+✅ Analyze audio data
+✅ Build practical applications
+
+## Next Steps
+
+* Integrate with speech recognition APIs (e.g., Whisper)
+* Build voice-controlled applications
+* Create audio processing pipelines
+* Collect voice data for ML models
+* Build podcast recording tools
+
+Happy recording! 🎙️
