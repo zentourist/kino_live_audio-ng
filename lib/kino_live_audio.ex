@@ -219,7 +219,7 @@ defmodule KinoLiveAudio do
   @impl true
   def handle_event("audio_chunk", {:binary, _info, binary}, ctx) do
     # Emit the audio chunk as an event for Kino.listen
-    emit_event(ctx, binary)
+    emit_event(ctx, %{event: :audio_chunk, chunk: binary})
     {:noreply, ctx}
   end
 
