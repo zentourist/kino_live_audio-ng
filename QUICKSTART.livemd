@@ -1,0 +1,127 @@
+# Quick Start: Audio Streaming with Kino.listen
+
+This is the exact pattern you're looking for - streaming audio chunks with `Kino.listen/2`.
+
+## Your Use Case
+
+```elixir
+Mix.install([
+  {:kino_live_audio, path: "#{__DIR__}"}
+])
+```
+
+## Setup
+
+```elixir
+sample_rate = 16_000
+
+live_audio = KinoLiveAudio.new(
+  chunk_size: 30,
+  unit: :ms,
+  sample_rate: sample_rate
+)
+```
+
+## Listen to Audio Chunks
+
+```elixir
+live_audio
+|> Kino.listen(fn data ->
+  # This will now work! Each chunk of audio will trigger this callback
+  IO.puts("Received audio chunk: #{byte_size(data)} bytes")
+
+  # You can write to a file
+  File.write!(Path.join(__DIR__, "files/output.log"), inspect(data), [:append])
+
+  # Or process the audio in real-time
+  # send_to_transcription_service(data)
+  # analyze_audio(data)
+end)
+
+IO.puts("✅ Listener attached! Start recording to receive chunks.")
+```
+
+Click "Start Recording" and speak into your microphone. You should now see audio chunks being logged!
+
+## What Changed
+
+The key changes that make this work:
+
+1. **Added `chunk_size` option** - This tells the recorder to emit chunks at regular intervals
+2. **Added `unit` option** - Specifies whether chunk_size is in milliseconds (`:ms`) or samples (`:samples`)
+3. **Used `emit_event/2`** - The Elixir side now emits events that `Kino.listen/2` can consume
+4. **MediaRecorder timeslice** - The JavaScript side uses the `timeslice` parameter to generate chunks
+
+## Chunk Size Guidelines
+
+- **10-30ms** - Good for real-time transcription and low-latency applications
+- **50-100ms** - Balanced for most use cases
+- **200-500ms** - Larger chunks, less overhead, suitable for batch processing
+
+At 16kHz sample rate:
+- 30ms = ~960 samples = ~1920 bytes (stereo) or ~960 bytes (mono)
+- 100ms = ~3200 samples
+
+## Example: Writing to File
+
+```elixir
+# Create output directory if it doesn't exist
+output_dir = Path.join(__DIR__, "files")
+File.mkdir_p!(output_dir)
+
+# Create recorder
+recorder = KinoLiveAudio.new(
+  chunk_size: 30,
+  unit: :ms,
+  sample_rate: 16_000
+)
+
+# Setup file writing
+output_file = Path.join(output_dir, "output.log")
+File.write!(output_file, "Starting recording...\n")
+
+recorder
+|> Kino.listen(fn data ->
+  timestamp = DateTime.utc_now() |> DateTime.to_string()
+  log_entry = "#{timestamp}: Chunk size #{byte_size(data)} bytes\n"
+  File.write!(output_file, log_entry, [:append])
+end)
+
+recorder
+```
+
+## Example: Real-time Counter
+
+```elixir
+counter_recorder = KinoLiveAudio.new(
+  chunk_size: 50,
+  unit: :ms,
+  sample_rate: 16_000
+)
+
+# Create a frame for live updates
+frame = Kino.Frame.new() |> Kino.render()
+
+# Track chunks
+chunk_count = :atomics.new(1, [])
+total_bytes = :atomics.new(1, [])
+
+counter_recorder
+|> Kino.listen(fn data ->
+  count = :atomics.add_get(chunk_count, 1, 1)
+  bytes = :atomics.add_get(total_bytes, 1, byte_size(data))
+
+  Kino.Frame.render(frame, Kino.Markdown.new("""
+  ## 📊 Live Audio Stats
+
+  - **Chunks received:** #{count}
+  - **Total bytes:** #{bytes}
+  - **Last chunk:** #{byte_size(data)} bytes
+  - **Avg chunk size:** #{div(bytes, count)} bytes
+  """))
+end)
+
+counter_recorder
+```
+
+Now start recording and watch the stats update in real-time!
