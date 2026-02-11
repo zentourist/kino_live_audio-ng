@@ -1,0 +1,290 @@
+# KinoLiveAudio Streaming Example
+
+```elixir
+Mix.install([
+  {:kino_live_audio, path: "#{__DIR__}"}
+])
+```
+
+## Introduction
+
+This notebook demonstrates the streaming capabilities of KinoLiveAudio, which allows you to process audio chunks in real-time as they're being recorded.
+
+## Basic Streaming
+
+Create a recorder with streaming enabled:
+
+```elixir
+sample_rate = 16_000
+
+live_audio = KinoLiveAudio.new(
+  chunk_size: 30,        # 30ms chunks
+  unit: :ms,
+  sample_rate: sample_rate,
+  auto_play: false       # Disable auto-play for streaming
+)
+```
+
+Now let's set up a listener to receive audio chunks:
+
+```elixir
+# Counter for chunks
+chunk_count = :atomics.new(1, [])
+total_bytes = :atomics.new(1, [])
+
+live_audio
+|> Kino.listen(fn chunk ->
+  count = :atomics.add_get(chunk_count, 1, 1)
+  bytes = :atomics.add_get(total_bytes, 1, byte_size(chunk))
+
+  IO.puts("Chunk ##{count}: #{byte_size(chunk)} bytes (Total: #{bytes} bytes)")
+end)
+
+IO.puts("✅ Listener attached! Start recording to see chunks arrive.")
+```
+
+Click "Start Recording" on the widget above and speak into your microphone. You'll see chunks being logged in real-time!
+
+## Streaming to File
+
+Let's stream audio chunks directly to a file as they arrive:
+
+```elixir
+output_path = Path.join(System.tmp_dir!(), "streamed_audio_#{:os.system_time(:second)}.webm")
+
+# Open file for writing
+{:ok, file} = File.open(output_path, [:write, :binary])
+
+streamer = KinoLiveAudio.new(
+  chunk_size: 50,
+  unit: :ms,
+  sample_rate: 48_000,
+  auto_play: false
+)
+
+# Write chunks to file as they arrive
+streamer
+|> Kino.listen(fn chunk ->
+  IO.binwrite(file, chunk)
+  IO.write(".")  # Progress indicator
+end)
+
+streamer
+```
+
+Record some audio, then close the file:
+
+```elixir
+File.close(file)
+stat = File.stat!(output_path)
+IO.puts("\n✅ Saved #{stat.size} bytes to #{output_path}")
+```
+
+## Real-time Audio Analysis
+
+Let's analyze audio properties in real-time:
+
+```elixir
+defmodule AudioAnalyzer do
+  def analyze_chunk(chunk) do
+    %{
+      size: byte_size(chunk),
+      timestamp: System.system_time(:millisecond)
+    }
+  end
+end
+
+analyzer_recorder = KinoLiveAudio.new(
+  chunk_size: 100,
+  unit: :ms,
+  sample_rate: 16_000
+)
+
+# Create a frame to display stats
+frame = Kino.Frame.new() |> Kino.render()
+
+# Analyze chunks in real-time
+analyzer_recorder
+|> Kino.listen(fn chunk ->
+  analysis = AudioAnalyzer.analyze_chunk(chunk)
+
+  Kino.Frame.render(frame, Kino.Markdown.new("""
+  ## Live Audio Stats
+
+  **Last Chunk:**
+  - Size: #{analysis.size} bytes
+  - Timestamp: #{analysis.timestamp}
+  - Time: #{DateTime.from_unix!(analysis.timestamp, :millisecond) |> DateTime.to_time() |> Time.to_string()}
+  """))
+end)
+
+analyzer_recorder
+```
+
+## Buffered Streaming
+
+Sometimes you want to accumulate chunks before processing. Here's an example:
+
+```elixir
+defmodule ChunkBuffer do
+  use Agent
+
+  def start_link(_) do
+    Agent.start_link(fn -> [] end, name: __MODULE__)
+  end
+
+  def add_chunk(chunk) do
+    Agent.update(__MODULE__, fn chunks -> [chunk | chunks] end)
+  end
+
+  def get_and_clear() do
+    Agent.get_and_update(__MODULE__, fn chunks ->
+      {Enum.reverse(chunks), []}
+    end)
+  end
+
+  def count() do
+    Agent.get(__MODULE__, &length/1)
+  end
+end
+
+# Start the buffer
+{:ok, _} = ChunkBuffer.start_link([])
+
+buffered_recorder = KinoLiveAudio.new(
+  chunk_size: 50,
+  unit: :ms,
+  sample_rate: 16_000,
+  auto_play: false
+)
+
+# Add chunks to buffer
+buffered_recorder
+|> Kino.listen(fn chunk ->
+  ChunkBuffer.add_chunk(chunk)
+  count = ChunkBuffer.count()
+
+  # Process every 20 chunks (1 second of audio)
+  if rem(count, 20) == 0 do
+    chunks = ChunkBuffer.get_and_clear()
+    combined = IO.iodata_to_binary(chunks)
+    IO.puts("📦 Processed batch: #{byte_size(combined)} bytes from #{length(chunks)} chunks")
+  end
+end)
+
+buffered_recorder
+```
+
+## Different Chunk Sizes
+
+Let's compare different chunk sizes:
+
+```elixir
+chunk_sizes = [
+  {10, "10ms - Very small chunks, high overhead"},
+  {30, "30ms - Good for real-time processing"},
+  {100, "100ms - Balanced"},
+  {500, "500ms - Larger chunks, less overhead"}
+]
+
+for {size, description} <- chunk_sizes do
+  IO.puts("\n### #{description}")
+
+  recorder = KinoLiveAudio.new(
+    chunk_size: size,
+    unit: :ms,
+    sample_rate: 16_000,
+    auto_play: false
+  )
+
+  Kino.render(recorder)
+end
+
+:ok
+```
+
+## Chunk Size in Samples
+
+You can also specify chunk size in samples instead of milliseconds:
+
+```elixir
+# At 16kHz, 480 samples = 30ms
+# (480 samples / 16000 samples per second = 0.03 seconds)
+
+sample_recorder = KinoLiveAudio.new(
+  chunk_size: 480,
+  unit: :samples,
+  sample_rate: 16_000
+)
+
+sample_recorder
+|> Kino.listen(fn chunk ->
+  IO.puts("Sample-based chunk: #{byte_size(chunk)} bytes")
+end)
+
+sample_recorder
+```
+
+## Integration Example: Simple Voice Activity Detection
+
+Here's a simple example of using streaming for voice activity detection:
+
+```elixir
+defmodule SimpleVAD do
+  # Very basic VAD based on chunk size
+  # In reality, you'd analyze the audio content
+  def detect_voice(chunk, threshold \\ 100) do
+    byte_size(chunk) > threshold
+  end
+end
+
+vad_recorder = KinoLiveAudio.new(
+  chunk_size: 50,
+  unit: :ms,
+  sample_rate: 16_000
+)
+
+vad_frame = Kino.Frame.new() |> Kino.render()
+
+vad_recorder
+|> Kino.listen(fn chunk ->
+  voice_detected = SimpleVAD.detect_voice(chunk)
+
+  status = if voice_detected, do: "🎤 Voice detected", else: "🔇 Silence"
+  color = if voice_detected, do: "green", else: "gray"
+
+  Kino.Frame.render(vad_frame, Kino.Markdown.new("""
+  <div style="padding: 20px; background: #{color}; color: white; border-radius: 8px;">
+    <h2>#{status}</h2>
+    <p>Chunk size: #{byte_size(chunk)} bytes</p>
+  </div>
+  """))
+end)
+
+vad_recorder
+```
+
+## Summary
+
+You've learned how to:
+
+✅ Enable streaming with `chunk_size` and `unit` options
+✅ Use `Kino.listen/2` to process audio chunks in real-time
+✅ Stream audio directly to files
+✅ Perform real-time audio analysis
+✅ Buffer chunks for batch processing
+✅ Configure different chunk sizes for different use cases
+✅ Build simple voice activity detection
+
+## Use Cases
+
+Streaming audio chunks is perfect for:
+
+- **Real-time transcription** - Send chunks to Whisper or other STT APIs
+- **Voice commands** - Detect keywords or commands as they're spoken
+- **Audio monitoring** - Monitor audio levels or quality in real-time
+- **Live broadcasting** - Stream audio to external services
+- **Voice activity detection** - Detect when someone is speaking
+- **Real-time audio effects** - Process audio on-the-fly
+
+Happy streaming! 🎙️

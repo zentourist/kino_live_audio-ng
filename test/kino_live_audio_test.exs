@@ -23,6 +23,16 @@ defmodule KinoLiveAudioTest do
       assert %Kino.JS.Live{} = recorder
     end
 
+    test "creates a recorder with streaming enabled" do
+      recorder = KinoLiveAudio.new(chunk_size: 30, unit: :ms)
+      assert %Kino.JS.Live{} = recorder
+    end
+
+    test "creates a recorder with chunk size in samples" do
+      recorder = KinoLiveAudio.new(chunk_size: 480, unit: :samples, sample_rate: 16000)
+      assert %Kino.JS.Live{} = recorder
+    end
+
     test "raises error for invalid format" do
       assert_raise ArgumentError, fn ->
         KinoLiveAudio.new(format: :invalid)
@@ -32,6 +42,18 @@ defmodule KinoLiveAudioTest do
     test "raises error for invalid sample rate" do
       assert_raise ArgumentError, fn ->
         KinoLiveAudio.new(sample_rate: -1)
+      end
+    end
+
+    test "raises error for invalid chunk_size" do
+      assert_raise ArgumentError, fn ->
+        KinoLiveAudio.new(chunk_size: -1)
+      end
+    end
+
+    test "raises error for invalid unit" do
+      assert_raise ArgumentError, fn ->
+        KinoLiveAudio.new(chunk_size: 30, unit: :invalid)
       end
     end
   end

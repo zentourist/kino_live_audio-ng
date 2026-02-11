@@ -3,7 +3,8 @@ defmodule KinoLiveAudio do
   A Kino component for recording live audio from the browser in Livebook.
 
   This component allows you to capture audio from the user's microphone
-  and store it as binary data that can be processed or saved.
+  and store it as binary data that can be processed or saved. It supports
+  both streaming audio chunks in real-time and capturing complete recordings.
 
   ## Examples
 
@@ -12,6 +13,14 @@ defmodule KinoLiveAudio do
 
       # Read the recorded audio data
       audio_data = KinoLiveAudio.read(recorder)
+
+      # Stream audio chunks as they're recorded
+      recorder = KinoLiveAudio.new(chunk_size: 30, unit: :ms)
+
+      Kino.listen(recorder, fn chunk ->
+        # Process audio chunk in real-time
+        IO.inspect(byte_size(chunk))
+      end)
 
       # Start recording programmatically
       KinoLiveAudio.start_recording(recorder)
@@ -36,6 +45,13 @@ defmodule KinoLiveAudio do
     * `:auto_play` - whether to automatically play back the recording
       when recording stops. Defaults to `true`.
 
+    * `:chunk_size` - the size of audio chunks to stream. When set, audio
+      chunks will be emitted as events that can be consumed with `Kino.listen/2`.
+      Defaults to `nil` (no streaming).
+
+    * `:unit` - the unit for `:chunk_size`. Either `:ms` (milliseconds) or
+      `:samples`. Defaults to `:ms`.
+
   ## Recording Format
 
   The recorded audio is stored as binary data. The format depends on
@@ -46,6 +62,18 @@ defmodule KinoLiveAudio do
 
       audio_data = KinoLiveAudio.read(recorder)
       File.write!("recording.webm", audio_data)
+
+  ## Streaming Audio
+
+  When `:chunk_size` is specified, audio chunks will be emitted as events
+  during recording. This is useful for real-time audio processing:
+
+      recorder = KinoLiveAudio.new(chunk_size: 100, unit: :ms, sample_rate: 16000)
+
+      Kino.listen(recorder, fn chunk ->
+        # Process chunk (e.g., send to speech recognition)
+        process_audio_chunk(chunk)
+      end)
 
   """
 
@@ -63,11 +91,14 @@ defmodule KinoLiveAudio do
     * `:format` - the audio format. Defaults to `:webm`
     * `:sample_rate` - the sample rate in Hz. Defaults to `48000`
     * `:auto_play` - whether to play back after recording. Defaults to `true`
+    * `:chunk_size` - size of streaming audio chunks. Defaults to `nil` (no streaming)
+    * `:unit` - unit for chunk_size (`:ms` or `:samples`). Defaults to `:ms`
 
   ## Examples
 
       KinoLiveAudio.new()
       KinoLiveAudio.new(format: :wav, sample_rate: 44100)
+      KinoLiveAudio.new(chunk_size: 30, unit: :ms, sample_rate: 16000)
 
   """
   @spec new(keyword()) :: t()
@@ -75,6 +106,8 @@ defmodule KinoLiveAudio do
     format = Keyword.get(opts, :format, :webm)
     sample_rate = Keyword.get(opts, :sample_rate, 48000)
     auto_play = Keyword.get(opts, :auto_play, true)
+    chunk_size = Keyword.get(opts, :chunk_size)
+    unit = Keyword.get(opts, :unit, :ms)
 
     unless format in [:wav, :webm, :mp3, :ogg] do
       raise ArgumentError,
@@ -86,10 +119,22 @@ defmodule KinoLiveAudio do
             "expected :sample_rate to be a positive integer, got: #{inspect(sample_rate)}"
     end
 
+    unless is_nil(chunk_size) or (is_integer(chunk_size) and chunk_size > 0) do
+      raise ArgumentError,
+            "expected :chunk_size to be a positive integer or nil, got: #{inspect(chunk_size)}"
+    end
+
+    unless unit in [:ms, :samples] do
+      raise ArgumentError,
+            "expected :unit to be :ms or :samples, got: #{inspect(unit)}"
+    end
+
     Kino.JS.Live.new(__MODULE__, %{
       format: format,
       sample_rate: sample_rate,
       auto_play: auto_play,
+      chunk_size: chunk_size,
+      unit: unit,
       audio_data: nil
     })
   end
@@ -167,13 +212,21 @@ defmodule KinoLiveAudio do
     payload = %{
       format: ctx.assigns.format,
       sample_rate: ctx.assigns.sample_rate,
-      auto_play: ctx.assigns.auto_play
+      auto_play: ctx.assigns.auto_play,
+      chunk_size: ctx.assigns.chunk_size,
+      unit: ctx.assigns.unit
     }
 
     {:ok, payload, ctx}
   end
 
   @impl true
+  def handle_event("audio_chunk", {:binary, _info, binary}, ctx) do
+    # Emit the audio chunk as an event for Kino.listen
+    emit_event(ctx, binary)
+    {:noreply, ctx}
+  end
+
   def handle_event("audio_data", {:binary, info, binary}, ctx) do
     ctx = assign(ctx, audio_data: binary)
     broadcast_event(ctx, "audio_saved", info)

@@ -106,6 +106,36 @@ System.cmd("ffmpeg", [
 ], input: audio_data)
 ```
 
+### Streaming Audio Chunks
+
+For real-time audio processing, you can stream audio chunks as they're recorded:
+
+```elixir
+# Create a recorder with streaming enabled
+recorder = KinoLiveAudio.new(
+  chunk_size: 30,      # 30ms chunks
+  unit: :ms,           # or :samples
+  sample_rate: 16_000,
+  auto_play: false
+)
+
+# Listen to audio chunks in real-time
+Kino.listen(recorder, fn chunk ->
+  IO.puts("Received audio chunk: #{byte_size(chunk)} bytes")
+  # Process chunk immediately (e.g., send to real-time transcription)
+  process_chunk(chunk)
+end)
+
+# Start recording
+KinoLiveAudio.start_recording(recorder)
+```
+
+This is particularly useful for:
+- Real-time speech recognition
+- Live audio analysis
+- Streaming to external services
+- Voice activity detection
+
 ### Integration with AI Services
 
 ```elixir
@@ -134,6 +164,13 @@ When creating a new recorder with `KinoLiveAudio.new/1`, you can pass the follow
   
 - `:auto_play` - Whether to automatically play back the recording when recording stops.
   Default: `true`
+
+- `:chunk_size` - Size of audio chunks to stream during recording. When set, audio chunks will be emitted
+  as events that can be consumed with `Kino.listen/2`. Set to `nil` to disable streaming.
+  Default: `nil`
+
+- `:unit` - Unit for the `:chunk_size` option. Either `:ms` (milliseconds) or `:samples`.
+  Default: `:ms`
 
 ## API Reference
 
