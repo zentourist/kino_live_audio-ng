@@ -8,18 +8,8 @@ defmodule KinoLiveAudioTest do
       assert %Kino.JS.Live{} = recorder
     end
 
-    test "creates a recorder with custom format" do
-      recorder = KinoLiveAudio.new(format: :wav)
-      assert %Kino.JS.Live{} = recorder
-    end
-
     test "creates a recorder with custom sample rate" do
       recorder = KinoLiveAudio.new(sample_rate: 44100)
-      assert %Kino.JS.Live{} = recorder
-    end
-
-    test "creates a recorder with auto_play disabled" do
-      recorder = KinoLiveAudio.new(auto_play: false)
       assert %Kino.JS.Live{} = recorder
     end
 
@@ -31,12 +21,6 @@ defmodule KinoLiveAudioTest do
     test "creates a recorder with chunk size in samples" do
       recorder = KinoLiveAudio.new(chunk_size: 480, unit: :samples, sample_rate: 16000)
       assert %Kino.JS.Live{} = recorder
-    end
-
-    test "raises error for invalid format" do
-      assert_raise ArgumentError, fn ->
-        KinoLiveAudio.new(format: :invalid)
-      end
     end
 
     test "raises error for invalid sample rate" do

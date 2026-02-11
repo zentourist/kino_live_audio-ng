@@ -1,0 +1,379 @@
+# Voice Activity Detection (VAD) with KinoLiveAudio
+
+```elixir
+Mix.install([
+  {:kino_live_audio, path: "#{__DIR__}"}
+])
+```
+
+## Introduction
+
+This notebook demonstrates how to use KinoLiveAudio for Voice Activity Detection (VAD).
+VAD is the process of detecting when someone is speaking vs. silence or background noise.
+
+With raw PCM access, you can implement VAD algorithms in Elixir!
+
+## Understanding PCM Audio
+
+PCM (Pulse Code Modulation) represents audio as a series of samples:
+- Each sample is a floating-point number between -1.0 and 1.0
+- The sample represents the amplitude of the sound wave at that moment
+- Sample rate determines how many samples per second (e.g., 16000 Hz = 16000 samples/sec)
+
+```elixir
+# Example: Parse PCM binary into samples
+sample_pcm = <<0.5::float-32-little, -0.3::float-32-little, 0.8::float-32-little>>
+samples = for <<sample::float-32-little <- sample_pcm>>, do: sample
+IO.inspect(samples, label: "Parsed samples")
+```
+
+## Simple Energy-Based VAD
+
+The simplest VAD approach uses RMS (Root Mean Square) energy:
+
+```elixir
+defmodule SimpleVAD do
+  @doc """
+  Calculate RMS (Root Mean Square) energy of audio chunk.
+  Higher RMS = louder audio = likely voice.
+  """
+  def calculate_rms(pcm_binary) do
+    samples = for <<sample::float-32-little <- pcm_binary>>, do: sample
+
+    if length(samples) == 0 do
+      0.0
+    else
+      sum_squares = Enum.reduce(samples, 0.0, fn s, acc -> acc + s * s end)
+      :math.sqrt(sum_squares / length(samples))
+    end
+  end
+
+  @doc """
+  Detect if voice is active based on energy threshold.
+  Threshold typically between 0.01 and 0.05 for normalized audio.
+  """
+  def voice_active?(pcm_binary, threshold \\ 0.02) do
+    calculate_rms(pcm_binary) > threshold
+  end
+
+  @doc """
+  Get voice activity status as a string
+  """
+  def status(pcm_binary, threshold \\ 0.02) do
+    rms = calculate_rms(pcm_binary)
+    active = voice_active?(pcm_binary, threshold)
+
+    %{
+      rms: Float.round(rms, 4),
+      active: active,
+      status: if(active, do: "🎤 VOICE", else: "🔇 SILENCE")
+    }
+  end
+end
+
+# Test it
+test_voice = <<0.1::float-32-little, 0.2::float-32-little, 0.15::float-32-little>>
+test_silence = <<0.001::float-32-little, -0.002::float-32-little, 0.001::float-32-little>>
+
+IO.inspect(SimpleVAD.status(test_voice), label: "Voice sample")
+IO.inspect(SimpleVAD.status(test_silence), label: "Silence sample")
+```
+
+## Real-time VAD with Live Display
+
+Let's create a live VAD monitor:
+
+```elixir
+# Create recorder with 30ms chunks
+vad_recorder = KinoLiveAudio.new(
+  chunk_size: 30,
+  unit: :ms,
+  sample_rate: 16_000
+)
+
+# Create a frame for live updates
+vad_frame = Kino.Frame.new() |> Kino.render()
+
+# Track statistics
+stats = %{
+  total_chunks: :atomics.new(1, []),
+  voice_chunks: :atomics.new(1, []),
+  total_energy: :atomics.new(1, signed: true)
+}
+
+# Process chunks in real-time
+vad_recorder
+|> Kino.listen(fn chunk ->
+  # Calculate VAD status
+  status = SimpleVAD.status(chunk, 0.02)
+
+  # Update statistics
+  total = :atomics.add_get(stats.total_chunks, 1, 1)
+  voice = if status.active do
+    :atomics.add_get(stats.voice_chunks, 1, 1)
+  else
+    :atomics.get(stats.voice_chunks, 1)
+  end
+
+  # Calculate percentage
+  voice_pct = if total > 0, do: Float.round(voice / total * 100, 1), else: 0.0
+
+  # Update display
+  Kino.Frame.render(vad_frame, Kino.Markdown.new("""
+  # Voice Activity Detection
+
+  ## Current Status
+  **#{status.status}**
+
+  RMS Energy: #{status.rms}
+
+  ## Statistics
+  - Total Chunks: #{total}
+  - Voice Chunks: #{voice}
+  - Voice Activity: #{voice_pct}%
+
+  ---
+  #{if status.active, do: "🟢 ", else: "⚫ "}#{String.duplicate("█", trunc(status.rms * 100))}
+  """))
+end)
+
+vad_recorder
+```
+
+Click "Start Recording" and speak! Watch the real-time VAD output.
+
+## Advanced VAD with Zero-Crossing Rate
+
+Zero-crossing rate (ZCR) counts how many times the signal crosses zero:
+
+```elixir
+defmodule AdvancedVAD do
+  def calculate_rms(samples) do
+    if length(samples) == 0 do
+      0.0
+    else
+      sum_squares = Enum.reduce(samples, 0.0, fn s, acc -> acc + s * s end)
+      :math.sqrt(sum_squares / length(samples))
+    end
+  end
+
+  def calculate_zcr(samples) do
+    if length(samples) < 2 do
+      0.0
+    else
+      crossings = samples
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.count(fn [a, b] -> (a >= 0 and b < 0) or (a < 0 and b >= 0) end)
+
+      crossings / (length(samples) - 1)
+    end
+  end
+
+  def voice_active?(pcm_binary, energy_threshold \\ 0.02, zcr_threshold \\ 0.3) do
+    samples = for <<sample::float-32-little <- pcm_binary>>, do: sample
+
+    rms = calculate_rms(samples)
+    zcr = calculate_zcr(samples)
+
+    # Voice typically has:
+    # - Moderate to high energy (RMS > threshold)
+    # - Lower ZCR than noise (ZCR < threshold)
+    rms > energy_threshold and zcr < zcr_threshold
+  end
+
+  def analyze(pcm_binary) do
+    samples = for <<sample::float-32-little <- pcm_binary>>, do: sample
+
+    rms = calculate_rms(samples)
+    zcr = calculate_zcr(samples)
+    active = voice_active?(pcm_binary)
+
+    %{
+      rms: Float.round(rms, 4),
+      zcr: Float.round(zcr, 4),
+      active: active,
+      status: if(active, do: "🎤 VOICE", else: "🔇 SILENCE")
+    }
+  end
+end
+
+# Test the advanced VAD
+IO.puts("Testing Advanced VAD:")
+IO.inspect(AdvancedVAD.analyze(test_voice), label: "Voice")
+IO.inspect(AdvancedVAD.analyze(test_silence), label: "Silence")
+```
+
+## Advanced VAD Monitor
+
+```elixir
+# Create recorder
+advanced_recorder = KinoLiveAudio.new(
+  chunk_size: 50,
+  unit: :ms,
+  sample_rate: 16_000
+)
+
+# Create display frame
+advanced_frame = Kino.Frame.new() |> Kino.render()
+
+# Process with advanced VAD
+advanced_recorder
+|> Kino.listen(fn chunk ->
+  analysis = AdvancedVAD.analyze(chunk)
+
+  color = if analysis.active, do: "#22c55e", else: "#6b7280"
+
+  Kino.Frame.render(advanced_frame, Kino.Markdown.new("""
+  <div style="padding: 20px; background: #{color}; color: white; border-radius: 8px;">
+    <h2>#{analysis.status}</h2>
+    <p><strong>RMS Energy:</strong> #{analysis.rms}</p>
+    <p><strong>Zero Crossing Rate:</strong> #{analysis.zcr}</p>
+  </div>
+  """))
+end)
+
+advanced_recorder
+```
+
+## Saving Voice Segments
+
+Let's collect only the voice segments:
+
+```elixir
+defmodule VoiceCollector do
+  use GenServer
+
+  def start_link(_) do
+    GenServer.start_link(__MODULE__, %{chunks: [], recording_voice: false}, name: __MODULE__)
+  end
+
+  def init(state), do: {:ok, state}
+
+  def add_chunk(chunk, is_voice) do
+    GenServer.cast(__MODULE__, {:add_chunk, chunk, is_voice})
+  end
+
+  def get_voice_data do
+    GenServer.call(__MODULE__, :get_voice_data)
+  end
+
+  def clear do
+    GenServer.cast(__MODULE__, :clear)
+  end
+
+  def handle_cast({:add_chunk, chunk, is_voice}, state) do
+    if is_voice do
+      {:noreply, %{state | chunks: [chunk | state.chunks], recording_voice: true}}
+    else
+      {:noreply, state}
+    end
+  end
+
+  def handle_cast(:clear, state) do
+    {:noreply, %{state | chunks: []}}
+  end
+
+  def handle_call(:get_voice_data, _from, state) do
+    combined = state.chunks |> Enum.reverse() |> IO.iodata_to_binary()
+    {:reply, combined, state}
+  end
+end
+
+{:ok, _} = VoiceCollector.start_link([])
+
+# Create recorder
+collector_recorder = KinoLiveAudio.new(
+  chunk_size: 30,
+  unit: :ms,
+  sample_rate: 16_000
+)
+
+# Collect voice chunks
+collector_recorder
+|> Kino.listen(fn chunk ->
+  is_voice = SimpleVAD.voice_active?(chunk, 0.02)
+  VoiceCollector.add_chunk(chunk, is_voice)
+
+  if is_voice do
+    IO.write("🎤")
+  else
+    IO.write(".")
+  end
+end)
+
+collector_recorder
+```
+
+After recording, get the voice data:
+
+```elixir
+voice_data = VoiceCollector.get_voice_data()
+IO.puts("Collected #{byte_size(voice_data)} bytes of voice data")
+
+# Convert to samples
+samples = for <<sample::float-32-little <- voice_data>>, do: sample
+IO.puts("Total voice samples: #{length(samples)}")
+IO.puts("Duration: #{Float.round(length(samples) / 16_000, 2)} seconds")
+```
+
+## Export Voice as WAV
+
+```elixir
+defmodule WAVExporter do
+  def pcm_f32_to_wav(pcm_data, sample_rate) do
+    # Convert Float32 to Int16
+    samples = for <<sample::float-32-little <- pcm_data>> do
+      int_sample = trunc(sample * 32767)
+      max(min(int_sample, 32767), -32768)
+    end
+
+    pcm_int16 = for sample <- samples, into: <<>> do
+      <<sample::little-signed-16>>
+    end
+
+    data_size = byte_size(pcm_int16)
+
+    <<
+      "RIFF", data_size + 36::little-32, "WAVE",
+      "fmt ", 16::little-32, 1::little-16, 1::little-16,
+      sample_rate::little-32, sample_rate * 2::little-32,
+      2::little-16, 16::little-16,
+      "data", data_size::little-32,
+      pcm_int16::binary
+    >>
+  end
+end
+
+# Export the voice segments
+if byte_size(voice_data) > 0 do
+  wav_data = WAVExporter.pcm_f32_to_wav(voice_data, 16_000)
+  filename = "/tmp/voice_segments_#{:os.system_time(:second)}.wav"
+  File.write!(filename, wav_data)
+  IO.puts("✅ Saved voice segments to: #{filename}")
+else
+  IO.puts("No voice data to export")
+end
+```
+
+## Summary
+
+You've learned:
+
+✅ How to parse raw PCM audio in Elixir
+✅ Calculate RMS energy for basic VAD
+✅ Use Zero-Crossing Rate for improved VAD
+✅ Build real-time VAD monitors
+✅ Collect only voice segments
+✅ Export PCM data as WAV files
+
+## Use Cases
+
+This approach is perfect for:
+
+- **Speech Recognition** - Only send voice segments to recognition API
+- **Voice Commands** - Detect when user starts speaking
+- **Audio Compression** - Remove silence before saving/transmitting
+- **Call Analytics** - Measure talk time vs. silence
+- **Voice Biometrics** - Extract voice features for identification
+
+Happy VAD coding! 🎙️

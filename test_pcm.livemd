@@ -1,0 +1,57 @@
+# Test PCM Audio - Quick Verification
+
+```elixir
+Mix.install([
+  {:kino_live_audio, path: "#{__DIR__}"}
+])
+```
+
+## Quick Test
+
+This is a simple test to verify PCM audio is working correctly.
+
+```elixir
+# Create recorder
+test_recorder = KinoLiveAudio.new(
+  chunk_size: 50,
+  unit: :ms,
+  sample_rate: 16_000
+)
+
+# Listen and parse PCM
+test_recorder
+|> Kino.listen(fn chunk ->
+  # Parse Float32 samples
+  samples = for <<sample::float-32-little <- chunk>>, do: sample
+
+  # Verify format
+  IO.puts("✅ Received PCM chunk")
+  IO.puts("   Bytes: #{byte_size(chunk)}")
+  IO.puts("   Samples: #{length(samples)}")
+  IO.puts("   First sample: #{List.first(samples)}")
+  IO.puts("   Min: #{Enum.min(samples) |> Float.round(4)}")
+  IO.puts("   Max: #{Enum.max(samples) |> Float.round(4)}")
+  IO.puts("   ---")
+end)
+
+test_recorder
+```
+
+**Expected output when recording:**
+```
+✅ Received PCM chunk
+   Bytes: 3200
+   Samples: 800
+   First sample: 0.0234
+   Min: -0.1523
+   Max: 0.1876
+   ---
+```
+
+This confirms:
+- ✅ Chunks are arriving
+- ✅ Format is Float32 (4 bytes per sample)
+- ✅ Sample values are between -1.0 and 1.0
+- ✅ Chunk size is correct (50ms × 16kHz = 800 samples = 3200 bytes)
+
+If you see this output, PCM audio is working perfectly! 🎉

@@ -2,23 +2,24 @@ defmodule KinoLiveAudio do
   @moduledoc """
   A Kino component for recording live audio from the browser in Livebook.
 
-  This component allows you to capture audio from the user's microphone
-  and store it as binary data that can be processed or saved. It supports
-  both streaming audio chunks in real-time and capturing complete recordings.
+  This component allows you to capture raw PCM audio from the user's microphone
+  and stream it as binary data for real-time processing. The audio is captured
+  using the Web Audio API with AudioWorklet for low-latency access to raw samples.
 
   ## Examples
 
       # Create a simple audio recorder
       recorder = KinoLiveAudio.new()
 
-      # Read the recorded audio data
+      # Read the recorded audio data (raw PCM)
       audio_data = KinoLiveAudio.read(recorder)
 
       # Stream audio chunks as they're recorded
       recorder = KinoLiveAudio.new(chunk_size: 30, unit: :ms)
 
       Kino.listen(recorder, fn chunk ->
-        # Process audio chunk in real-time
+        # Process raw PCM audio chunk in real-time
+        # Perfect for VAD, speech recognition, etc.
         IO.inspect(byte_size(chunk))
       end)
 
@@ -35,15 +36,8 @@ defmodule KinoLiveAudio do
 
   When creating a new recorder with `new/1`, you can pass the following options:
 
-    * `:format` - the audio format to record in. Supported formats are
-      `:wav`, `:webm`, `:mp3`, `:ogg`. Defaults to `:webm` as it has
-      the best browser support.
-
     * `:sample_rate` - the sample rate for recording. Common values are
       `8000`, `16000`, `44100`, `48000`. Defaults to `48000`.
-
-    * `:auto_play` - whether to automatically play back the recording
-      when recording stops. Defaults to `true`.
 
     * `:chunk_size` - the size of audio chunks to stream. When set, audio
       chunks will be emitted as events that can be consumed with `Kino.listen/2`.
@@ -52,26 +46,30 @@ defmodule KinoLiveAudio do
     * `:unit` - the unit for `:chunk_size`. Either `:ms` (milliseconds) or
       `:samples`. Defaults to `:ms`.
 
-  ## Recording Format
+  ## Audio Format
 
-  The recorded audio is stored as binary data. The format depends on
-  the browser's support and the specified format option. WebM with
-  Opus codec is widely supported across modern browsers.
+  The recorded audio is raw PCM (Pulse Code Modulation) data in 32-bit
+  float little-endian format (`pcm_f32le`). Each sample is a Float32 value
+  between -1.0 and 1.0, representing the audio waveform amplitude.
 
-  To save the audio to a file:
+  This format is ideal for:
+  - Voice Activity Detection (VAD)
+  - Real-time speech recognition
+  - Audio analysis and DSP
+  - Custom audio processing pipelines
 
-      audio_data = KinoLiveAudio.read(recorder)
-      File.write!("recording.webm", audio_data)
+  To convert PCM to other formats, you can use FFmpeg or other audio tools.
 
   ## Streaming Audio
 
-  When `:chunk_size` is specified, audio chunks will be emitted as events
-  during recording. This is useful for real-time audio processing:
+  When `:chunk_size` is specified, raw PCM chunks will be emitted as events
+  during recording. This is perfect for real-time audio processing:
 
       recorder = KinoLiveAudio.new(chunk_size: 100, unit: :ms, sample_rate: 16000)
 
       Kino.listen(recorder, fn chunk ->
-        # Process chunk (e.g., send to speech recognition)
+        # chunk is raw PCM data (Float32 samples)
+        # Process chunk for VAD, transcription, etc.
         process_audio_chunk(chunk)
       end)
 
@@ -81,38 +79,40 @@ defmodule KinoLiveAudio do
   use Kino.JS.Live
 
   @type t :: Kino.JS.Live.t()
-  @type audio_format :: :wav | :webm | :mp3 | :ogg
 
   @doc """
   Creates a new live audio recorder.
 
+  The recorder captures raw PCM audio data (32-bit float samples) from the
+  browser's microphone using the Web Audio API.
+
   ## Options
 
-    * `:format` - the audio format. Defaults to `:webm`
-    * `:sample_rate` - the sample rate in Hz. Defaults to `48000`
-    * `:auto_play` - whether to play back after recording. Defaults to `true`
-    * `:chunk_size` - size of streaming audio chunks. Defaults to `nil` (no streaming)
+    * `:sample_rate` - the sample rate in Hz. Defaults to `48000`.
+      Common values: `8000`, `16000`, `44100`, `48000`
+
+    * `:chunk_size` - size of streaming audio chunks. When set, chunks are
+      emitted continuously during recording. Defaults to `nil` (no streaming)
+
     * `:unit` - unit for chunk_size (`:ms` or `:samples`). Defaults to `:ms`
 
   ## Examples
 
+      # Basic recorder (no streaming, 48kHz)
       KinoLiveAudio.new()
-      KinoLiveAudio.new(format: :wav, sample_rate: 44100)
-      KinoLiveAudio.new(chunk_size: 30, unit: :ms, sample_rate: 16000)
+
+      # Stream 30ms chunks at 16kHz (common for speech recognition)
+      KinoLiveAudio.new(chunk_size: 30, unit: :ms, sample_rate: 16_000)
+
+      # Stream 480 samples at a time (30ms at 16kHz)
+      KinoLiveAudio.new(chunk_size: 480, unit: :samples, sample_rate: 16_000)
 
   """
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
-    format = Keyword.get(opts, :format, :webm)
-    sample_rate = Keyword.get(opts, :sample_rate, 48000)
-    auto_play = Keyword.get(opts, :auto_play, true)
+    sample_rate = Keyword.get(opts, :sample_rate, 48_000)
     chunk_size = Keyword.get(opts, :chunk_size)
     unit = Keyword.get(opts, :unit, :ms)
-
-    unless format in [:wav, :webm, :mp3, :ogg] do
-      raise ArgumentError,
-            "expected :format to be one of :wav, :webm, :mp3, :ogg, got: #{inspect(format)}"
-    end
 
     unless is_integer(sample_rate) and sample_rate > 0 do
       raise ArgumentError,
@@ -130,9 +130,7 @@ defmodule KinoLiveAudio do
     end
 
     Kino.JS.Live.new(__MODULE__, %{
-      format: format,
       sample_rate: sample_rate,
-      auto_play: auto_play,
       chunk_size: chunk_size,
       unit: unit,
       audio_data: nil
@@ -210,9 +208,7 @@ defmodule KinoLiveAudio do
   @impl true
   def handle_connect(ctx) do
     payload = %{
-      format: ctx.assigns.format,
       sample_rate: ctx.assigns.sample_rate,
-      auto_play: ctx.assigns.auto_play,
       chunk_size: ctx.assigns.chunk_size,
       unit: ctx.assigns.unit
     }

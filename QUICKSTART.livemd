@@ -1,6 +1,6 @@
-# Quick Start: Audio Streaming with Kino.listen
+# Quick Start: Raw PCM Audio Streaming for VAD
 
-This is the exact pattern you're looking for - streaming audio chunks with `Kino.listen/2`.
+This is exactly what you need - streaming raw PCM audio chunks with `Kino.listen/2` for Voice Activity Detection (VAD) in Elixir.
 
 ## Your Use Case
 
@@ -10,90 +10,107 @@ Mix.install([
 ])
 ```
 
-## Setup
+## Setup for VAD
 
 ```elixir
 sample_rate = 16_000
 
 live_audio = KinoLiveAudio.new(
-  chunk_size: 30,
+  chunk_size: 30,      # 30ms chunks
   unit: :ms,
   sample_rate: sample_rate
 )
 ```
 
-## Listen to Audio Chunks
+## Access Raw PCM Samples
 
 ```elixir
 live_audio
-|> Kino.listen(fn data ->
-  # This will now work! Each chunk of audio will trigger this callback
-  IO.puts("Received audio chunk: #{byte_size(data)} bytes")
+|> Kino.listen(fn chunk ->
+  # chunk is raw PCM data (Float32 samples in binary format)
+  # Each sample is 4 bytes (32-bit float), value between -1.0 and 1.0
+
+  IO.puts("Received PCM chunk: #{byte_size(chunk)} bytes")
+
+  # Parse the binary into Float32 samples
+  samples = for <<sample::float-32-little <- chunk>>, do: sample
+  IO.puts("  Samples: #{length(samples)}")
+  IO.puts("  First sample: #{List.first(samples)}")
 
   # You can write to a file
-  File.write!(Path.join(__DIR__, "files/output.log"), inspect(data), [:append])
+  File.write!(Path.join(__DIR__, "files/output.log"), inspect(chunk), [:append])
 
-  # Or process the audio in real-time
-  # send_to_transcription_service(data)
-  # analyze_audio(data)
+  # Or process for VAD
+  # calculate_rms(samples)
+  # detect_voice(samples)
 end)
 
-IO.puts("✅ Listener attached! Start recording to receive chunks.")
+IO.puts("✅ Listener attached! Start recording to receive PCM chunks.")
 ```
 
-Click "Start Recording" and speak into your microphone. You should now see audio chunks being logged!
+Click "Start Recording" and speak into your microphone. You'll see raw PCM chunks arriving!
 
-## What Changed
-
-The key changes that make this work:
-
-1. **Added `chunk_size` option** - This tells the recorder to emit chunks at regular intervals
-2. **Added `unit` option** - Specifies whether chunk_size is in milliseconds (`:ms`) or samples (`:samples`)
-3. **Used `emit_event/2`** - The Elixir side now emits events that `Kino.listen/2` can consume
-4. **MediaRecorder timeslice** - The JavaScript side uses the `timeslice` parameter to generate chunks
-
-## Chunk Size Guidelines
-
-- **10-30ms** - Good for real-time transcription and low-latency applications
-- **50-100ms** - Balanced for most use cases
-- **200-500ms** - Larger chunks, less overhead, suitable for batch processing
-
-At 16kHz sample rate:
-- 30ms = ~960 samples = ~1920 bytes (stereo) or ~960 bytes (mono)
-- 100ms = ~3200 samples
-
-## Example: Writing to File
+## Simple VAD Implementation
 
 ```elixir
-# Create output directory if it doesn't exist
-output_dir = Path.join(__DIR__, "files")
-File.mkdir_p!(output_dir)
+defmodule SimpleVAD do
+  def calculate_rms(pcm_binary) do
+    samples = for <<sample::float-32-little <- pcm_binary>>, do: sample
+    sum_squares = Enum.reduce(samples, 0.0, fn s, acc -> acc + s * s end)
+    :math.sqrt(sum_squares / length(samples))
+  end
 
-# Create recorder
+  def voice_active?(pcm_binary, threshold \\ 0.02) do
+    calculate_rms(pcm_binary) > threshold
+  end
+end
+
+# Use it
 recorder = KinoLiveAudio.new(
   chunk_size: 30,
   unit: :ms,
   sample_rate: 16_000
 )
 
-# Setup file writing
-output_file = Path.join(output_dir, "output.log")
-File.write!(output_file, "Starting recording...\n")
-
 recorder
-|> Kino.listen(fn data ->
-  timestamp = DateTime.utc_now() |> DateTime.to_string()
-  log_entry = "#{timestamp}: Chunk size #{byte_size(data)} bytes\n"
-  File.write!(output_file, log_entry, [:append])
+|> Kino.listen(fn chunk ->
+  if SimpleVAD.voice_active?(chunk) do
+    IO.puts("🎤 Voice detected!")
+    # Send to speech recognition, save, etc.
+  else
+    IO.puts("🔇 Silence")
+  end
 end)
 
 recorder
 ```
 
-## Example: Real-time Counter
+## What You Get
+
+Each chunk is **raw PCM audio** in Float32 format:
+- **Format**: pcm_f32le (32-bit float, little-endian)
+- **Channels**: Mono (1 channel)
+- **Sample values**: -1.0 to 1.0 (normalized)
+- **No compression**: Direct access to waveform samples
+
+At 16kHz with 30ms chunks:
+- 30ms = 480 samples
+- 480 samples × 4 bytes = 1920 bytes per chunk
+- ~33 chunks per second
+
+## Why Raw PCM?
+
+Unlike compressed formats (MP3, WebM), you get:
+- ✅ **Direct sample access** - Calculate RMS, zero-crossing rate, spectral features
+- ✅ **Real-time processing** - No decoding latency
+- ✅ **Predictable chunks** - Exact sample count every time
+- ✅ **Perfect for VAD** - Analyze audio properties immediately
+- ✅ **DSP ready** - Apply filters, transformations, feature extraction
+
+## Real-time VAD Monitor
 
 ```elixir
-counter_recorder = KinoLiveAudio.new(
+vad_recorder = KinoLiveAudio.new(
   chunk_size: 50,
   unit: :ms,
   sample_rate: 16_000
@@ -102,26 +119,68 @@ counter_recorder = KinoLiveAudio.new(
 # Create a frame for live updates
 frame = Kino.Frame.new() |> Kino.render()
 
-# Track chunks
-chunk_count = :atomics.new(1, [])
-total_bytes = :atomics.new(1, [])
-
-counter_recorder
-|> Kino.listen(fn data ->
-  count = :atomics.add_get(chunk_count, 1, 1)
-  bytes = :atomics.add_get(total_bytes, 1, byte_size(data))
+vad_recorder
+|> Kino.listen(fn chunk ->
+  rms = SimpleVAD.calculate_rms(chunk)
+  active = SimpleVAD.voice_active?(chunk)
 
   Kino.Frame.render(frame, Kino.Markdown.new("""
-  ## 📊 Live Audio Stats
+  ## 🎙️ Voice Activity Detection
 
-  - **Chunks received:** #{count}
-  - **Total bytes:** #{bytes}
-  - **Last chunk:** #{byte_size(data)} bytes
-  - **Avg chunk size:** #{div(bytes, count)} bytes
+  **Status:** #{if active, do: "🟢 VOICE DETECTED", else: "⚫ SILENCE"}
+
+  **RMS Energy:** #{Float.round(rms, 4)}
+
+  **Visual:** #{String.duplicate("█", trunc(rms * 100))}
   """))
 end)
 
-counter_recorder
+vad_recorder
 ```
 
-Now start recording and watch the stats update in real-time!
+## Converting PCM to WAV
+
+If you need to save as WAV:
+
+```elixir
+defmodule WAVConverter do
+  def pcm_to_wav(pcm_f32_data, sample_rate) do
+    # Convert Float32 to Int16
+    samples = for <<sample::float-32-little <- pcm_f32_data>> do
+      int_sample = trunc(sample * 32767)
+      max(min(int_sample, 32767), -32768)
+    end
+
+    pcm_int16 = for sample <- samples, into: <<>> do
+      <<sample::little-signed-16>>
+    end
+
+    data_size = byte_size(pcm_int16)
+
+    <<
+      "RIFF", data_size + 36::little-32, "WAVE",
+      "fmt ", 16::little-32, 1::little-16, 1::little-16,
+      sample_rate::little-32, sample_rate * 2::little-32,
+      2::little-16, 16::little-16,
+      "data", data_size::little-32,
+      pcm_int16::binary
+    >>
+  end
+end
+
+# Use it
+pcm_data = KinoLiveAudio.read(vad_recorder)
+if pcm_data do
+  wav_data = WAVConverter.pcm_to_wav(pcm_data, 16_000)
+  File.write!("recording.wav", wav_data)
+end
+```
+
+## Perfect for Your VAD Processing!
+
+You now have direct access to raw audio samples in Elixir, perfect for:
+- Voice Activity Detection
+- Speech recognition preprocessing
+- Audio feature extraction
+- Real-time audio analysis
+- Custom DSP algorithms
